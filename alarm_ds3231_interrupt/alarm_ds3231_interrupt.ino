@@ -56,12 +56,10 @@ void setup() {
     rtc.disableAlarm(2);
 
     // schedule an alarm 10 seconds in the future
-    if(!rtc.setAlarm1(
-            rtc.now() + TimeSpan(10),
-            DS3231_A1_Second // this mode triggers the alarm when the seconds match. See Doxygen for other options
-    )) {
+    if(!rtc.setAlarm1(rtc.now() + TimeSpan(10),DS3231_A1_Second)) {
         Serial.println("Error, alarm wasn't set!");
-    }else {
+    }
+    else {
         Serial.println("\nAlarm will happen in 10 seconds!");
     }
 }
