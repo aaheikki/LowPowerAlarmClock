@@ -12,13 +12,22 @@
 
 #define SS_SWITCH        24
 #define SS_NEOPIX        6
-
 #define SEESAW_ADDR          0x36
+
+#define BUZZER_PIN 27
 
 Adafruit_seesaw ss;
 seesaw_NeoPixel sspixel = seesaw_NeoPixel(1, SS_NEOPIX, NEO_GRB + NEO_KHZ800);
 
 int32_t encoder_position;
+
+// Setupping interrupt pin
+#define ENCODER_INTERRUPT_PIN 3
+volatile bool encoder_flag = false;
+void onEncoder_Interrupt(void) { //Interrupt to set tiem and to change flag -> main work in loop()
+  encoder_flag = true; 
+}
+
 
 void setup() {
   Serial.begin(115200);
@@ -56,31 +65,38 @@ void setup() {
   ss.enableEncoderInterrupt();
 
   // Buzzer pin
-  pinMode(27, OUTPUT);   // configure pin 27 as output
+  pinMode(BUZZER_PIN, OUTPUT);   // configure pin BUZZER_PIN as output
+  digitalWrite(BUZZER_PIN,LOW);
+
+  //Interrut pins
+  pinMode(ENCODER_INTERRUPT_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(ENCODER_INTERRUPT_PIN), onEncoder_Interrupt, FALLING);
 }
 
 void loop() {
-  if (! ss.digitalRead(SS_SWITCH)) {
-    Serial.println("Button pressed!");
-    digitalWrite(27,HIGH);
-  }
-  else{
-    digitalWrite(27,LOW);
-  }
+  if(encoder_flag){
+    encoder_flag = false;
+    Serial.println("Encoder Interrupt!");
+    // Only now do we talk to the seesaw over I2C
+    if (!ss.digitalRead(SS_SWITCH)) {
+        Serial.println("Button pressed!");
+        digitalWrite(BUZZER_PIN, HIGH);
+    } else {
+        digitalWrite(BUZZER_PIN, LOW);
+    }
 
-  int32_t new_position = ss.getEncoderPosition();
-  // did we move arounde?
-  if (encoder_position != new_position) {
-    Serial.println(new_position);         // display new position
-
-    // change the neopixel color
-    sspixel.setPixelColor(0, Wheel(new_position & 0xFF));
-    sspixel.show();
-    encoder_position = new_position;      // and save for next round
+    int32_t new_position = ss.getEncoderPosition();
+    if (encoder_position != new_position) {
+        Serial.println(new_position);
+        sspixel.setPixelColor(0, Wheel(new_position & 0xFF));
+        sspixel.show();
+        encoder_position = new_position;
+    }
   }
+  __WFE();   // Wait For Event — CPU sleeps until an event occurs
+  __SEV();   // Set Event — sets the internal event register
+  __WFE();   // This one actually sleeps (the SEV+WFE clears any spurious pending event)
 
-  // don't overwhelm serial port
-  delay(10);
 }
 
 
