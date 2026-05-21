@@ -1,3 +1,4 @@
+// Clock and screen
 #include <RTClib.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
@@ -16,14 +17,35 @@ RTC_DS3231 rtc; // define rtc object
 #define SCREEN_ADDRESS 0x3C ///< See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-
-
 volatile bool clock_flag = false;
 DateTime time_now;
+DateTime time_last_interaction ;
 
 void onClock_Interrupt(void) { //Interrupt to set tiem and to change flag -> main work in loop()
   clock_flag = true; 
 }
+
+// Encoder
+#include <Adafruit_seesaw.h>
+#include <seesaw_neopixel.h>
+
+#define SS_SWITCH        24
+#define SS_NEOPIX        6
+#define SEESAW_ADDR      0x36
+#define BUZZER_PIN 27
+#define ENCODER_INTERRUPT_PIN 3
+#define INTERACTION_INTERVAL 30
+
+Adafruit_seesaw ss;
+seesaw_NeoPixel sspixel = seesaw_NeoPixel(1, SS_NEOPIX, NEO_GRB + NEO_KHZ800);
+int32_t encoder_position;
+volatile bool encoder_flag = false;
+
+void onEncoder_Interrupt(void) { //Interrupt to set tiem and to change flag -> main work in loop()
+  encoder_flag = true; 
+}
+
+
 
 void refresh_time(){
   time_now = rtc.now();
@@ -48,22 +70,63 @@ void refresh_time(){
   delay(2000);
 }
 
-void setup() {
+void refresh_position(){  
+    Serial.println("Encoder Interrupt!");
+    time_last_interaction = rtc.now();
+    char time_char[10] = "hh:mm:ss"; // Initialize time char  
+    time_now.toString(time_char);
+    Serial.print("last_interaction: ");
+    Serial.println(time_char); 
+    time_now.toString(time_char);
+    // Only now do we talk to the seesaw over I2C
+    if (!ss.digitalRead(SS_SWITCH)) {
+        Serial.println("Button pressed!");        
+        digitalWrite(BUZZER_PIN, HIGH); // Alarm on
+    } else {
+        digitalWrite(BUZZER_PIN, LOW); // Alarm off
+    }
+
+    int32_t new_position = ss.getEncoderPosition();
+    if (encoder_position != new_position) {
+        Serial.println(new_position);
+        sspixel.setPixelColor(0, Wheel(new_position & 0xFF));
+        sspixel.show();
+        encoder_position = new_position;
+    }
+}
+
+
+uint32_t Wheel(byte WheelPos) {
+  WheelPos = 255 - WheelPos;
+  if (WheelPos < 85) {
+    return sspixel.Color(255 - WheelPos * 3, 0, WheelPos * 3);
+  }
+  if (WheelPos < 170) {
+    WheelPos -= 85;
+    return sspixel.Color(0, WheelPos * 3, 255 - WheelPos * 3);
+  }
+  WheelPos -= 170;
+  return sspixel.Color(WheelPos * 3, 255 - WheelPos * 3, 0);
+}
+
+void setup() {  
   pinMode(POWER_CONTROL_PIN, OUTPUT);
   digitalWrite(POWER_CONTROL_PIN, LOW);
   Serial.begin(115200);
+  Serial.println("Start of setup");
 
   // --------- Setup Display
   if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {// SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
     Serial.println(F("SSD1306 allocation failed"));    
   }
   display.clearDisplay(); // clear display buffer
-
+  Serial.println("Screen found");
 
   // --------- Setup RTC
   if(!rtc.begin()){
     Serial.println("Could not find RTC!");
   }
+  Serial.println("Clock found");
   if(rtc.lostPower()) {
     Serial.println("RTC lost power, set time!");
   }
@@ -76,21 +139,55 @@ void setup() {
       Serial.println("Error, alarm wasn't set!");
   }
 
-  //Interrut pins
+  //Clock interrut pin
   pinMode(CLOCK_INTERRUPT_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(CLOCK_INTERRUPT_PIN), onClock_Interrupt, FALLING);
   
+  // Setup encoder
   refresh_time();
+  if (! ss.begin(SEESAW_ADDR) || ! sspixel.begin(SEESAW_ADDR)) {
+    Serial.println("Couldn't find seesaw on default address");
+    while(1) delay(10);
+  }
+  Serial.println("seesaw started");
+  Serial.println("Found Product 4991");
+
+  // set not so bright!
+  sspixel.setBrightness(20);
+  sspixel.show();
+  
+  // use a pin for the built in encoder switch
+  ss.pinMode(SS_SWITCH, INPUT_PULLUP);
+
+  // get starting position
+  encoder_position = ss.getEncoderPosition();
+
+  Serial.println("Turning on interrupts");
+  delay(10);
+  ss.setGPIOInterrupts((uint32_t)1 << SS_SWITCH, 1);
+  ss.enableEncoderInterrupt();
+
+  // Buzzer pin
+  pinMode(BUZZER_PIN, OUTPUT);   // configure pin BUZZER_PIN as output
+  digitalWrite(BUZZER_PIN,LOW);
+
+  // Encoder interrut pin
+  pinMode(ENCODER_INTERRUPT_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(ENCODER_INTERRUPT_PIN), onEncoder_Interrupt, FALLING);
 }
 
 void loop() {  
-  /*
   // Handel clock interrupt
-  if(clock_flag){  
-    clock_flag = false;
-    refresh_time();
-  }  
-  */
+  while(clock_flag || encoder_flag || (rtc.now() >= time_last_interaction + TimeSpan(INTERACTION_INTERVAL),DS3231_A1_Second)){
+    //Serial.print("time_last_interaction_bool: ");
+    //Serial.println((rtc.now() >= (time_last_interaction + TimeSpan(INTERACTION_INTERVAL),DS3231_A1_Second) ));
+    if(clock_flag){  
+      clock_flag = false; refresh_time();
+    }
+    if(encoder_flag){  
+      encoder_flag = false; refresh_position();
+    }
+  }
   
   //Deep sleep
   Serial.println("Entering deep sleep");

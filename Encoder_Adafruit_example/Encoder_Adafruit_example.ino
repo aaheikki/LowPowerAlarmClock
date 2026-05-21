@@ -7,12 +7,13 @@
         void disableEncoderInterrupt();
         void setEncoderPosition(int32_t pos);
  */
-#include "Adafruit_seesaw.h"
+#include <Adafruit_seesaw.h>
 #include <seesaw_neopixel.h>
 
 #define SS_SWITCH        24
 #define SS_NEOPIX        6
 #define SEESAW_ADDR          0x36
+#define POWER_CONTROL_PIN 30
 
 #define BUZZER_PIN 27
 
@@ -30,6 +31,8 @@ void onEncoder_Interrupt(void) { //Interrupt to set tiem and to change flag -> m
 
 
 void setup() {
+  pinMode(POWER_CONTROL_PIN, OUTPUT);
+  digitalWrite(POWER_CONTROL_PIN, LOW);
   Serial.begin(115200);
   while (!Serial) delay(10);
 
