@@ -8,7 +8,7 @@
 RTC_DS3231 rtc; // define rtc object
 
 #define CLOCK_INTERRUPT_PIN 2
-#define ALARM_INTERVAL 5
+#define ALARM_INTERVAL 60
 #define POWER_CONTROL_PIN 30
 
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
@@ -35,6 +35,7 @@ void onClock_Interrupt(void) { //Interrupt to set tiem and to change flag -> mai
 #define BUZZER_PIN 27
 #define ENCODER_INTERRUPT_PIN 3
 #define INTERACTION_INTERVAL 30
+#define BUTTON_INT_PIN 4
 
 Adafruit_seesaw ss;
 seesaw_NeoPixel sspixel = seesaw_NeoPixel(1, SS_NEOPIX, NEO_GRB + NEO_KHZ800);
@@ -67,14 +68,21 @@ void refresh_time(){
   // Set new alarm
   rtc.clearAlarm(1);
   rtc.setAlarm1(time_now + TimeSpan(ALARM_INTERVAL),DS3231_A1_Second); //set alarm ALARM_INTERVAL seconds to the future  
-  delay(2000);
+  Serial.print("Next wake up alarm: ");
+  print_time(time_now + TimeSpan(ALARM_INTERVAL));
+}
+
+void print_time(DateTime time){  
+  char time_char[10] = "hh:mm:ss"; // Initialize time char  
+  time.toString(time_char);  
+  Serial.println(time_char); 
 }
 
 void refresh_position(){  
-    Serial.println("Encoder Interrupt!");
+    //Serial.println("Encoder Interrupt!");
     time_last_interaction = rtc.now();
     char time_char[10] = "hh:mm:ss"; // Initialize time char  
-    time_now.toString(time_char);
+    time_last_interaction.toString(time_char);
     Serial.print("last_interaction: ");
     Serial.println(time_char); 
     time_now.toString(time_char);
@@ -112,21 +120,29 @@ uint32_t Wheel(byte WheelPos) {
 void setup() {  
   pinMode(POWER_CONTROL_PIN, OUTPUT);
   digitalWrite(POWER_CONTROL_PIN, LOW);
+  uint32_t buttonPin = g_ADigitalPinMap[BUTTON_INT_PIN];
+  nrf_gpio_cfg_sense_input(buttonPin, NRF_GPIO_PIN_PULLUP, NRF_GPIO_PIN_SENSE_LOW);
+  
   Serial.begin(115200);
   Serial.println("Start of setup");
+  
+  if (!digitalRead(BUTTON_INT_PIN)){
+    encoder_flag = true;    
+    Serial.println("Button press detected!");
+  };
 
   // --------- Setup Display
   if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {// SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
     Serial.println(F("SSD1306 allocation failed"));    
   }
   display.clearDisplay(); // clear display buffer
-  Serial.println("Screen found");
+  //Serial.println("Screen found");
 
   // --------- Setup RTC
   if(!rtc.begin()){
     Serial.println("Could not find RTC!");
   }
-  Serial.println("Clock found");
+  //Serial.println("Clock found");
   if(rtc.lostPower()) {
     Serial.println("RTC lost power, set time!");
   }
@@ -149,8 +165,8 @@ void setup() {
     Serial.println("Couldn't find seesaw on default address");
     while(1) delay(10);
   }
-  Serial.println("seesaw started");
-  Serial.println("Found Product 4991");
+  // Serial.println("seesaw started");
+
 
   // set not so bright!
   sspixel.setBrightness(20);
@@ -162,7 +178,6 @@ void setup() {
   // get starting position
   encoder_position = ss.getEncoderPosition();
 
-  Serial.println("Turning on interrupts");
   delay(10);
   ss.setGPIOInterrupts((uint32_t)1 << SS_SWITCH, 1);
   ss.enableEncoderInterrupt();
@@ -174,13 +189,24 @@ void setup() {
   // Encoder interrut pin
   pinMode(ENCODER_INTERRUPT_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(ENCODER_INTERRUPT_PIN), onEncoder_Interrupt, FALLING);
+  
 }
 
 void loop() {  
   // Handel clock interrupt
-  while(clock_flag || encoder_flag || (rtc.now() >= time_last_interaction + TimeSpan(INTERACTION_INTERVAL),DS3231_A1_Second)){
-    //Serial.print("time_last_interaction_bool: ");
-    //Serial.println((rtc.now() >= (time_last_interaction + TimeSpan(INTERACTION_INTERVAL),DS3231_A1_Second) ));
+  while( clock_flag || encoder_flag || (rtc.now() <= (time_last_interaction + TimeSpan(INTERACTION_INTERVAL) ))){
+    
+    /* depugging
+    Serial.print("Button intterrupt state before sleep: ")  ;
+    Serial.println(digitalRead(BUTTON_INT_PIN));
+    delay(500);
+    Serial.print("time_last_interaction_bool: ");
+    Serial.println((rtc.now() <= (time_last_interaction + TimeSpan(INTERACTION_INTERVAL) )));
+    DateTime timeint = (time_last_interaction + TimeSpan(INTERACTION_INTERVAL));
+    char time_char[10] = "hh:mm:ss"; // Initialize time char  
+    //timeint.toString(time_char);
+    //Serial.println(time_char);
+    */
     if(clock_flag){  
       clock_flag = false; refresh_time();
     }
@@ -189,12 +215,15 @@ void loop() {
     }
   }
   
+  delay(5000);
   //Deep sleep
   Serial.println("Entering deep sleep");
   Serial.println();
-  digitalWrite(POWER_CONTROL_PIN, HIGH);
+  digitalWrite(POWER_CONTROL_PIN, HIGH);  
   uint32_t nrfPin = g_ADigitalPinMap[CLOCK_INTERRUPT_PIN];
   nrf_gpio_cfg_sense_input(nrfPin, NRF_GPIO_PIN_PULLUP, NRF_GPIO_PIN_SENSE_LOW);
+  
+  delay(10);
   NRF_POWER->SYSTEMOFF = 1;
   
 
